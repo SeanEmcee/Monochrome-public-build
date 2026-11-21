@@ -1,0 +1,11 @@
+# Public repository must not contain private source or generated outputs.
+source/
+private-source/
+dist/
+node_modules/
+asset-manifest.json
+*.log
+*.map
+*.zip
+.env
+.env.*
