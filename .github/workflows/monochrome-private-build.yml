@@ -1,0 +1,171 @@
+name: Monochrome private-source build and Cloudflare deployment
+
+# Manual only. No push, pull_request, schedule, issue, or repository_dispatch triggers.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Choose validation, Cloudflare staging, or production deployment"
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - stage
+          - deploy
+      production_confirmation:
+        description: "For deploy only: type DEPLOY PLAYER 28"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monochrome-private-cloudflare-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate private source and optionally stage or deploy
+    if: github.repository == 'SeanEmcee/Monochrome-public-build' && github.actor == 'SeanEmcee' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.operation == 'deploy' && 'monochrome-production' || 'monochrome-nonproduction' }
+    defaults:
+      run:
+        shell: bash
+    env:
+      PRIVATE_REF: feature/worker-request-reduction-20261121
+      TEST_LOG: /tmp/monochrome-test.log
+      BUILD_LOG: /tmp/monochrome-assets.log
+      DEPLOY_LOG: /tmp/monochrome-deploy.log
+
+    steps:
+      - name: Require private-source credential and production confirmation
+        env:
+          SOURCE_TOKEN: ${{ secrets.MONO_PRIVATE_SOURCE_TOKEN }
+          MODE: ${{ inputs.operation }
+          CONFIRM: ${{ inputs.production_confirmation }
+        run: |
+          set -euo pipefail
+          if [[ -z "$SOURCE_TOKEN" ]]; then
+            echo "::error::Configure MONO_PRIVATE_SOURCE_TOKEN in this repository's Actions secrets."
+            exit 1
+          fi
+          if [[ "$MODE" == "deploy" && "$CONFIRM" != "DEPLOY PLAYER 28" ]]; then
+            echo "::error::Production requires exact confirmation: DEPLOY PLAYER 28"
+            exit 1
+          fi
+
+      - name: Checkout private Monochrome source, never persist Git credentials
+        id: private_checkout
+        uses: actions/checkout@v4
+        with:
+          repository: SeanEmcee/Monochrome-Deploy
+          ref: feature/worker-request-reduction-20261121
+          token: ${{ secrets.MONO_PRIVATE_SOURCE_TOKEN }
+          persist-credentials: false
+          fetch-depth: 1
+          path: source
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test private source (never publish private logs)
+        working-directory: source
+        run: |
+          set -euo pipefail
+          if ! npm run verify:local > "$TEST_LOG" 2>&1; then
+            echo "::error::Private source tests failed. Full diagnostics withheld from public logs."
+            exit 1
+          fi
+          echo "PASS: Private source tests."
+
+      - name: Reconstruct complete website assets and verify Player 28
+        working-directory: source
+        run: |
+          set -euo pipefail
+          if ! npm run assets:prepare > "$BUILD_LOG" 2>&1; then
+            echo "::error::Website asset reconstruction failed. Full diagnostics withheld from public logs."
+            exit 1
+          fi
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('asset-manifest.json', 'utf8'));
+          const paths = Object.keys(manifest);
+          if (paths.length < 195 || paths.length > 260) throw Error('Unexpected asset count');
+          for (const p of ['/index.html', '/sw.js', '/monochrome-refresh-bridge.js', '/monochrome-release.json']) {
+            if (!manifest[p]) throw Error('Missing required asset');
+          }
+          const release = JSON.parse(await readFile('dist/monochrome-release.json','utf8'));
+          if (release.release !== '2026-11-21-player-28') throw Error('Release identifier mismatch');
+          console.log('PASS: Complete Cloudflare asset manifest validated.');
+          NODE
+
+      - name: Stage or deploy via Cloudflare direct API (not GitHub build services)
+        if: inputs.operation != 'validate'
+        working-directory: source
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MONO_CLOUDFLARE_API_TOKEN }
+          MODE: ${{ inputs.operation }
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" ]]; then
+            echo "::error::Configure MONO_CLOUDFLARE_API_TOKEN in this repository's Actions secrets."
+            exit 1
+          fi
+          if [[ "$MODE" == 'deploy' ]]; then
+            if ! node tools/upload.mjs --deploy > "$DEPLOY_LOG" 2>&1; then
+              echo "::error::Production operation failed. It may already have changed; inspect private Cloudflare deployment history."
+              exit 1
+            fi
+            echo "PASS: Production promotion and release announcement."
+          else
+            if ! node tools/upload.mjs > "$DEPLOY_LOG" 2>&1; then
+              echo "::error::Cloudflare staging failed. No production promotion requested."
+              exit 1
+            fi
+            echo "PASS: New version staged without production promotion."
+          fi
+
+      - name: Verify production release beacon
+        if: inputs.operation == 'deploy'
+        run: |
+          node --input-type=module <<'NODE'
+          const r=await fetch('https://monochrome.seanmcappuccilli.workers.dev/monochrome-release.json', {
+            headers: {'cache-control':'no-cache'}, signal:AbortSignal.timeout(20000)
+          });
+          if (!r.ok) throw Error('Release beacon failed');
+          const v=await r.json();
+          if (v.release !== '2026-11-21-player-28') throw Error('Cloudflare is not serving the expected version');
+          console.log('PASS: Player 28 public release beacon.');
+          NODE
+
+      - name: Optionally upload private diagnostics to private repo draft release
+        if: always() && steps.private_checkout.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.MONO_PRIVATE_OUTPUT_TOKEN }
+          BUILD_STATUS: ${{ job.status }
+          MODE: ${{ inputs.operation }
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "Private diagnostics upload not configured; nothing published."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/private-diagnostics"
+          for item in "$TEST_LOG" "$BUILD_LOG" "$DEPLOY_LOG"; do
+            if [[ -f "$item" ]]; then cp "$item" "$RUNNER_TEMP/private-diagnostics/"; fi
+          done
+          printf 'Run status: %s\nMode: %s\n' "$BUILD_STATUS" "$MODE" > "$RUNNER_TEMP/private-diagnostics/summary.txt"
+          tag="monochrome-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          gh release create "$tag" "$RUNNER_TEMP/private-diagnostics/"* \
+            --repo SeanEmcee/Monochrome-Deploy \
+            --target "$(git -C source rev-parse HEAD)" --draft \
+            --title "Private Monochrome build $GITHUB_RUN_ID" \
+            --notes "Private build diagnostics only; no public artifacts." >/dev/null \
+            || echo "::warning::Private diagnostic release could not be created."
+          echo "Diagnostics stayed within private GitHub release storage."
