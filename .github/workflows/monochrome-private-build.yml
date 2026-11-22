@@ -14,7 +14,7 @@ on:
           - stage
           - deploy
       production_confirmation:
-        description: "For deploy only: type DEPLOY PLAYER 31"
+        description: "For deploy only: type DEPLOY PLAYER 32"
         required: false
         type: string
 
@@ -36,7 +36,7 @@ jobs:
       run:
         shell: bash
     env:
-      PRIVATE_REF: feature/worker-request-reduction-20261121
+      PRIVATE_REF: fix/butterchurn-recovery-20261122
       TEST_LOG: /tmp/monochrome-test.log
       BUILD_LOG: /tmp/monochrome-assets.log
       DEPLOY_LOG: /tmp/monochrome-deploy.log
@@ -53,8 +53,8 @@ jobs:
             echo "::error::Configure MONO_PRIVATE_SOURCE_TOKEN in this repository's Actions secrets."
             exit 1
           fi
-          if [[ "$MODE" == "deploy" && "$CONFIRM" != "DEPLOY PLAYER 31" ]]; then
-            echo "::error::Production requires exact confirmation: DEPLOY PLAYER 31"
+          if [[ "$MODE" == "deploy" && "$CONFIRM" != "DEPLOY PLAYER 32" ]]; then
+            echo "::error::Production requires exact confirmation: DEPLOY PLAYER 32"
             exit 1
           fi
 
@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: SeanEmcee/Monochrome-Deploy
-          ref: feature/worker-request-reduction-20261121
+          ref: fix/butterchurn-recovery-20261122
           token: ${{ secrets.MONO_PRIVATE_SOURCE_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -84,7 +84,7 @@ jobs:
           fi
           echo "PASS: Private source tests."
 
-      - name: Reconstruct complete website assets and verify Player 31
+      - name: Reconstruct complete website assets and verify Player 32
         working-directory: source
         run: |
           set -euo pipefail
@@ -101,7 +101,7 @@ jobs:
             if (!manifest[p]) throw Error('Missing required asset');
           }
           const release = JSON.parse(await readFile('dist/monochrome-release.json','utf8'));
-          if (release.release !== '2026-11-21-player-31') throw Error('Release identifier mismatch');
+          if (release.release !== '2026-11-22-player-32') throw Error('Release identifier mismatch');
           console.log('PASS: Complete Cloudflare asset manifest validated.');
           NODE
 
@@ -140,8 +140,8 @@ jobs:
           });
           if (!r.ok) throw Error('Release beacon failed');
           const v=await r.json();
-          if (v.release !== '2026-11-21-player-31') throw Error('Cloudflare is not serving the expected version');
-          console.log('PASS: Player 31 public release beacon.');
+          if (v.release !== '2026-11-22-player-32') throw Error('Cloudflare is not serving the expected version');
+          console.log('PASS: Player 32 public release beacon.');
           NODE
 
       - name: Optionally upload private diagnostics to private repo draft release
