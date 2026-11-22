@@ -14,7 +14,7 @@ on:
           - stage
           - deploy
       production_confirmation:
-        description: "For deploy only: type DEPLOY PLAYER 29"
+        description: "For deploy only: type DEPLOY PLAYER 30"
         required: false
         type: string
 
@@ -53,8 +53,8 @@ jobs:
             echo "::error::Configure MONO_PRIVATE_SOURCE_TOKEN in this repository's Actions secrets."
             exit 1
           fi
-          if [[ "$MODE" == "deploy" && "$CONFIRM" != "DEPLOY PLAYER 29" ]]; then
-            echo "::error::Production requires exact confirmation: DEPLOY PLAYER 29"
+          if [[ "$MODE" == "deploy" && "$CONFIRM" != "DEPLOY PLAYER 30" ]]; then
+            echo "::error::Production requires exact confirmation: DEPLOY PLAYER 30"
             exit 1
           fi
 
@@ -84,7 +84,7 @@ jobs:
           fi
           echo "PASS: Private source tests."
 
-      - name: Reconstruct complete website assets and verify Player 29
+      - name: Reconstruct complete website assets and verify Player 30
         working-directory: source
         run: |
           set -euo pipefail
@@ -101,7 +101,7 @@ jobs:
             if (!manifest[p]) throw Error('Missing required asset');
           }
           const release = JSON.parse(await readFile('dist/monochrome-release.json','utf8'));
-          if (release.release !== '2026-11-21-player-29') throw Error('Release identifier mismatch');
+          if (release.release !== '2026-11-21-player-30') throw Error('Release identifier mismatch');
           console.log('PASS: Complete Cloudflare asset manifest validated.');
           NODE
 
@@ -140,8 +140,8 @@ jobs:
           });
           if (!r.ok) throw Error('Release beacon failed');
           const v=await r.json();
-          if (v.release !== '2026-11-21-player-29') throw Error('Cloudflare is not serving the expected version');
-          console.log('PASS: Player 29 public release beacon.');
+          if (v.release !== '2026-11-21-player-30') throw Error('Cloudflare is not serving the expected version');
+          console.log('PASS: Player 30 public release beacon.');
           NODE
 
       - name: Optionally upload private diagnostics to private repo draft release
